@@ -95,8 +95,15 @@
                     <div id="statusDot" class="w-2 h-2 rounded-full bg-gray-500"></div>
                     <span id="statusText">Disconnected</span>
                 </div>
+
+                <button id="testOutputBtn" type="button" class="bg-emerald-600/90 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2" title="Play a 440 Hz tone through the output chain to verify headphones/speakers">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.707-3.707a1 1 0 011.09-.217zM14.657 2.929a1 1 0 011.414 0A9.972 9.972 0 0119 10a9.972 9.972 0 01-2.929 7.071 1 1 0 01-1.414-1.414A7.971 7.971 0 0017 10c0-2.21-.894-4.208-2.343-5.657a1 1 0 010-1.414zm-2.829 2.828a1 1 0 011.415 0A5.983 5.983 0 0115 10a5.984 5.984 0 01-1.757 4.243 1 1 0 01-1.415-1.415A3.984 3.984 0 0013 10a3.983 3.983 0 00-1.172-2.828 1 1 0 010-1.415z" clip-rule="evenodd" />
+                    </svg>
+                    <span id="testOutputText">Test Audio Output</span>
+                </button>
                 
-                <button id="toggleMicBtn" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl font-medium transition-all shadow-lg shadow-blue-500/30 flex items-center gap-2">
+                <button id="toggleMicBtn" type="button" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl font-medium transition-all shadow-lg shadow-blue-500/30 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clip-rule="evenodd" />
                     </svg>
@@ -107,6 +114,67 @@
 
         <div id="errorContainer" class="hidden mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
             <!-- Error messages injected here -->
+        </div>
+
+        <!-- Audio Device Routing (Bluetooth / Speakers / Mic) & Live Telemetry Panel -->
+        <div class="glass-panel rounded-2xl p-5 mb-8 border border-gray-800/80 space-y-4">
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                <div class="md:col-span-5">
+                    <label for="inputDeviceSelect" class="block text-xs font-medium text-gray-400 mb-1.5">Microphone Input Device</label>
+                    <select id="inputDeviceSelect" class="w-full bg-gray-900/90 border border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-blue-500">
+                        <option value="">System Default Microphone</option>
+                    </select>
+                </div>
+                <div class="md:col-span-5">
+                    <label for="outputDeviceSelect" class="block text-xs font-medium text-gray-400 mb-1.5">Audio Output Device (Bluetooth / Headphones)</label>
+                    <select id="outputDeviceSelect" class="w-full bg-gray-900/90 border border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-blue-500">
+                        <option value="">System Default Output</option>
+                    </select>
+                </div>
+                <div class="md:col-span-2 flex justify-end">
+                    <button id="refreshDevicesBtn" type="button" class="w-full bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-xl px-3 py-2 text-xs font-medium transition-colors">
+                        Refresh Devices
+                    </button>
+                </div>
+            </div>
+
+            <!-- Live Hardware & Signal Telemetry -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2 border-t border-gray-800/80 text-xs font-mono">
+                <div class="bg-gray-900/70 p-2.5 rounded-xl border border-gray-800">
+                    <div class="text-[10px] text-gray-500 uppercase">AudioContext</div>
+                    <div id="diagCtxState" class="text-gray-300 font-semibold mt-0.5 truncate">closed</div>
+                </div>
+                <div class="bg-gray-900/70 p-2.5 rounded-xl border border-gray-800">
+                    <div class="text-[10px] text-gray-500 uppercase">Mic Track</div>
+                    <div id="diagMicState" class="text-gray-300 font-semibold mt-0.5 truncate">inactive</div>
+                </div>
+                <div class="bg-gray-900/70 p-2.5 rounded-xl border border-gray-800">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[10px] text-gray-500 uppercase">Mic In RMS</span>
+                        <span id="diagInputRms" class="text-blue-400 font-semibold">0.000</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1.5 rounded-full mt-1.5 overflow-hidden">
+                        <div id="diagInputBar" class="bg-blue-500 h-full w-0 transition-all duration-75"></div>
+                    </div>
+                </div>
+                <div class="bg-gray-900/70 p-2.5 rounded-xl border border-gray-800">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[10px] text-gray-500 uppercase">Output RMS</span>
+                        <span id="diagOutputRms" class="text-emerald-400 font-semibold">0.000</span>
+                    </div>
+                    <div class="w-full bg-gray-800 h-1.5 rounded-full mt-1.5 overflow-hidden">
+                        <div id="diagOutputBar" class="bg-emerald-500 h-full w-0 transition-all duration-75"></div>
+                    </div>
+                </div>
+                <div class="bg-gray-900/70 p-2.5 rounded-xl border border-gray-800">
+                    <div class="text-[10px] text-gray-500 uppercase">Worklet Status</div>
+                    <div id="diagWorkletStatus" class="text-green-400 font-semibold mt-0.5 truncate">Ready (0 errs)</div>
+                </div>
+                <div class="bg-gray-900/70 p-2.5 rounded-xl border border-gray-800">
+                    <div class="text-[10px] text-gray-500 uppercase">Output Routing</div>
+                    <div id="diagOutputDevice" class="text-gray-300 font-semibold mt-0.5 truncate" title="System Default">Default Sink</div>
+                </div>
+            </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -283,14 +351,15 @@
                     
                     this.expectedAdvance = 2 * Math.PI * this.hop / this.N;
                     this.outEnvelope = 0.0;
+                    this.errorReported = false;
                     
                     this.port.onmessage = (event) => {
                         const data = event.data || {};
-                        if (typeof data.pitchRatio === 'number' && data.pitchRatio >= 0.4 && data.pitchRatio <= 2.5) {
+                        if (typeof data.pitchRatio === 'number' && Number.isFinite(data.pitchRatio) && data.pitchRatio >= 0.4 && data.pitchRatio <= 2.5) {
                             this.targetPitch = data.pitchRatio;
                             if (data.immediate) this.pitchRatio = data.pitchRatio;
                         }
-                        if (typeof data.formantRatio === 'number' && data.formantRatio >= 0.4 && data.formantRatio <= 2.5) {
+                        if (typeof data.formantRatio === 'number' && Number.isFinite(data.formantRatio) && data.formantRatio >= 0.4 && data.formantRatio <= 2.5) {
                             this.targetFormant = data.formantRatio;
                             if (data.immediate) this.formantRatio = data.formantRatio;
                         }
@@ -478,11 +547,14 @@
                     for (let k = 0; k <= halfN; k++) {
                         this.sumPhase[k] += this.newFreq[k];
                         // Keep accumulated phase wrapped for floating-point stability over long runs
-                        if (this.sumPhase[k] > Math.PI || this.sumPhase[k] < -Math.PI) {
+                        if (!Number.isFinite(this.sumPhase[k])) {
+                            this.sumPhase[k] = 0;
+                        } else if (this.sumPhase[k] > Math.PI || this.sumPhase[k] < -Math.PI) {
                             this.sumPhase[k] -= 2 * Math.PI * Math.round(this.sumPhase[k] / (2 * Math.PI));
                         }
                         let phase = this.sumPhase[k];
                         let mag = this.newMag[k] * normGain;
+                        if (!Number.isFinite(mag)) mag = 0;
                         
                         this.re[k] = mag * Math.cos(phase);
                         this.im[k] = mag * Math.sin(phase);
@@ -498,59 +570,104 @@
 
                     // 7. Synthesis Windowing & Overlap Add
                     for (let i = 0; i < this.N; i++) {
-                        this.outBuffer[i] += this.re[i] * this.window[i];
+                        const val = this.re[i] * this.window[i];
+                        this.outBuffer[i] += Number.isFinite(val) ? val : 0;
                     }
                 }
 
                 process(inputs, outputs) {
-                    const input = inputs[0];
                     const output = outputs[0];
-                    if (!input || input.length === 0 || !input[0]) return true;
+                    if (!output || output.length === 0) return true;
+                    const outChannel0 = output[0];
+                    const frameCount = outChannel0.length;
 
-                    const inChannel = input[0];
-                    const outChannel = output[0];
-
-                    for (let i = 0; i < inChannel.length; i++) {
-                        this.hopBuffer[this.hopPos] = inChannel[i];
-                        outChannel[i] = this.outQueue[this.hopPos];
-                        this.hopPos++;
-
-                        // Trigger block processing when hop buffer is full
-                        if (this.hopPos >= this.hop) {
-                            // Shift analysis buffer and append new hop
-                            this.inBuffer.copyWithin(0, this.hop);
-                            this.inBuffer.set(this.hopBuffer, this.N - this.hop);
-                            
-                            // Shift synthesis buffer to prepare for OLA
-                            this.outBuffer.copyWithin(0, this.hop);
-                            this.outBuffer.fill(0, this.N - this.hop);
-                            
-                            // Execute STFT Phase Vocoder block
-                            this.processBlock();
-                            
-                            // Extract OLA hop to queue.
-                            // Hann-Hann 75% overlap (4x overlap) constant sum is 1.5 -> multiply by 2/3 (0.6666667)
-                            for (let j = 0; j < this.hop; j++) {
-                                let s = this.outBuffer[j] * 0.6666666667;
-                                const absS = Math.abs(s);
-                                if (absS > this.outEnvelope) {
-                                    this.outEnvelope = 0.9 * this.outEnvelope + 0.1 * absS;
-                                } else {
-                                    this.outEnvelope = 0.999 * this.outEnvelope + 0.001 * absS;
-                                }
-                                if (this.outEnvelope > 0.92) {
-                                    s *= (0.92 / this.outEnvelope);
-                                }
-                                this.outQueue[j] = s;
+                    try {
+                        const input = inputs[0];
+                        if (!input || input.length === 0 || !input[0] || input[0].length === 0) {
+                            for (let c = 0; c < output.length; c++) {
+                                output[c].fill(0);
                             }
-                            
-                            this.hopPos = 0;
+                            return true;
                         }
-                    }
 
-                    // Handle Mono to Stereo routing
-                    for (let c = 1; c < output.length; c++) {
-                        output[c].set(outChannel);
+                        const numInChannels = input.length;
+
+                        for (let i = 0; i < frameCount; i++) {
+                            // Downmix available input channels safely
+                            let inSample = 0;
+                            let activeCh = 0;
+                            for (let c = 0; c < numInChannels; c++) {
+                                const ch = input[c];
+                                if (ch && i < ch.length) {
+                                    const s = ch[i];
+                                    if (Number.isFinite(s)) {
+                                        inSample += s;
+                                        activeCh++;
+                                    }
+                                }
+                            }
+                            if (activeCh > 1) inSample /= activeCh;
+
+                            this.hopBuffer[this.hopPos] = inSample;
+                            let outSample = this.outQueue[this.hopPos];
+                            if (!Number.isFinite(outSample)) outSample = 0;
+                            outChannel0[i] = outSample;
+                            this.hopPos++;
+
+                            // Trigger block processing when hop buffer is full
+                            if (this.hopPos >= this.hop) {
+                                // Shift analysis buffer and append new hop
+                                this.inBuffer.copyWithin(0, this.hop);
+                                this.inBuffer.set(this.hopBuffer, this.N - this.hop);
+                                
+                                // Shift synthesis buffer to prepare for OLA
+                                this.outBuffer.copyWithin(0, this.hop);
+                                this.outBuffer.fill(0, this.N - this.hop);
+                                
+                                // Execute STFT Phase Vocoder block
+                                this.processBlock();
+                                
+                                // Extract OLA hop to queue.
+                                // Hann-Hann 75% overlap (4x overlap) constant sum is 1.5 -> multiply by 2/3 (0.6666667)
+                                for (let j = 0; j < this.hop; j++) {
+                                    let s = this.outBuffer[j] * 0.6666666667;
+                                    if (!Number.isFinite(s)) {
+                                        s = 0;
+                                        this.outEnvelope = 0;
+                                    }
+                                    const absS = Math.abs(s);
+                                    if (absS > this.outEnvelope) {
+                                        this.outEnvelope = 0.9 * this.outEnvelope + 0.1 * absS;
+                                    } else {
+                                        this.outEnvelope = 0.999 * this.outEnvelope + 0.001 * absS;
+                                    }
+                                    if (!Number.isFinite(this.outEnvelope)) this.outEnvelope = 0;
+                                    if (this.outEnvelope > 0.92) {
+                                        s *= (0.92 / this.outEnvelope);
+                                    }
+                                    this.outQueue[j] = Number.isFinite(s) ? s : 0;
+                                }
+                                
+                                this.hopPos = 0;
+                            }
+                        }
+
+                        // Copy processed audio to all output channels (stereo L + R)
+                        for (let c = 1; c < output.length; c++) {
+                            output[c].set(outChannel0);
+                        }
+                    } catch (err) {
+                        for (let c = 0; c < output.length; c++) {
+                            output[c].fill(0);
+                        }
+                        if (!this.errorReported) {
+                            this.errorReported = true;
+                            this.port.postMessage({
+                                type: 'processor-error',
+                                processor: 'pitch-shift-processor',
+                                message: err && err.message ? err.message : String(err)
+                            });
+                        }
                     }
                     return true;
                 }
@@ -568,44 +685,75 @@
                     this.threshold = 0.85;
                     this.attackCoeff = Math.exp(-1.0 / (0.0005 * sampleRate));
                     this.releaseCoeff = Math.exp(-1.0 / (0.060 * sampleRate));
+                    this.errorReported = false;
                 }
 
                 process(inputs, outputs) {
-                    const input = inputs[0];
                     const output = outputs[0];
-                    if (!input || input.length === 0 || !input[0]) return true;
+                    if (!output || output.length === 0) return true;
+                    const len = output[0].length;
 
-                    const numChannels = input.length;
-                    const len = input[0].length;
-
-                    for (let i = 0; i < len; i++) {
-                        let peak = 0;
-                        for (let c = 0; c < numChannels; c++) {
-                            const absVal = Math.abs(input[c][i]);
-                            if (absVal > peak) peak = absVal;
-                        }
-
-                        if (peak > this.envelope) {
-                            this.envelope = this.attackCoeff * this.envelope + (1.0 - this.attackCoeff) * peak;
-                        } else {
-                            this.envelope = this.releaseCoeff * this.envelope + (1.0 - this.releaseCoeff) * peak;
-                        }
-
-                        let gain = 1.0;
-                        if (this.envelope > this.threshold) {
-                            gain = this.threshold / this.envelope;
-                        }
-
-                        for (let c = 0; c < output.length; c++) {
-                            const srcChan = input[c < numChannels ? c : 0];
-                            let s = srcChan[i] * gain;
-                            const absS = Math.abs(s);
-                            // Smooth soft-knee ceiling asymptotic to 0.97 (strictly <= 0.98)
-                            if (absS > 0.90) {
-                                const sign = s < 0 ? -1 : 1;
-                                s = sign * (0.90 + 0.07 * Math.tanh((absS - 0.90) / 0.07));
+                    try {
+                        const input = inputs[0];
+                        if (!input || input.length === 0 || !input[0] || input[0].length === 0) {
+                            for (let c = 0; c < output.length; c++) {
+                                output[c].fill(0);
                             }
-                            output[c][i] = s;
+                            this.envelope *= this.releaseCoeff;
+                            return true;
+                        }
+
+                        const numChannels = input.length;
+
+                        for (let i = 0; i < len; i++) {
+                            let peak = 0;
+                            for (let c = 0; c < numChannels; c++) {
+                                const ch = input[c];
+                                if (ch && i < ch.length) {
+                                    const val = ch[i];
+                                    if (Number.isFinite(val)) {
+                                        const absVal = Math.abs(val);
+                                        if (absVal > peak) peak = absVal;
+                                    }
+                                }
+                            }
+
+                            if (peak > this.envelope) {
+                                this.envelope = this.attackCoeff * this.envelope + (1.0 - this.attackCoeff) * peak;
+                            } else {
+                                this.envelope = this.releaseCoeff * this.envelope + (1.0 - this.releaseCoeff) * peak;
+                            }
+                            if (!Number.isFinite(this.envelope)) this.envelope = 0.0;
+
+                            let gain = 1.0;
+                            if (this.envelope > this.threshold && this.envelope > 1e-9) {
+                                gain = this.threshold / this.envelope;
+                            }
+
+                            for (let c = 0; c < output.length; c++) {
+                                const srcChan = (c < numChannels && input[c] && input[c].length > i) ? input[c] : input[0];
+                                const raw = srcChan ? srcChan[i] : 0;
+                                let s = (Number.isFinite(raw) ? raw : 0) * gain;
+                                const absS = Math.abs(s);
+                                // Smooth soft-knee ceiling asymptotic to 0.97 (strictly <= 0.98)
+                                if (absS > 0.90) {
+                                    const sign = s < 0 ? -1 : 1;
+                                    s = sign * (0.90 + 0.07 * Math.tanh((absS - 0.90) / 0.07));
+                                }
+                                output[c][i] = Number.isFinite(s) ? s : 0;
+                            }
+                        }
+                    } catch (err) {
+                        for (let c = 0; c < output.length; c++) {
+                            output[c].fill(0);
+                        }
+                        if (!this.errorReported) {
+                            this.errorReported = true;
+                            this.port.postMessage({
+                                type: 'processor-error',
+                                processor: 'smooth-limiter-processor',
+                                message: err && err.message ? err.message : String(err)
+                            });
                         }
                     }
                     return true;
@@ -625,12 +773,17 @@
 
         const state = {
             isActive: false,
+            isStarting: false,
+            isTestingOutput: false,
             isEffectOn: true,
             currentPreset: 'male',
             volume: 0.8,
             audioCtx: null,
+            testAudioCtx: null,
             stream: null,
             source: null,
+            inputGain: null,
+            inputAnalyser: null,
             pitchNode: null,
             dryGain: null,
             wetGain: null,
@@ -639,10 +792,17 @@
             limiter: null,
             analyser: null,
             streamDestination: null,
+            isConnectedToDestination: false,
+            audioBridgeEl: null,
             animationId: null,
             dataArray: null,
+            inputTimeArray: null,
+            outputTimeArray: null,
             workletUrl: null,
-            lastAck: null
+            lastAck: null,
+            workletErrorCount: 0,
+            lastWorkletError: null,
+            activeOutputLabel: 'Default Sink'
         };
 
         // --- 2.5 INTEGRATION API (Chrome Manifest V3 Compliant Bridge) ---
@@ -666,6 +826,19 @@
         // --- 3. DOM Elements ---
         const toggleMicBtn = document.getElementById('toggleMicBtn');
         const toggleMicText = document.getElementById('toggleMicText');
+        const testOutputBtn = document.getElementById('testOutputBtn');
+        const testOutputText = document.getElementById('testOutputText');
+        const inputDeviceSelect = document.getElementById('inputDeviceSelect');
+        const outputDeviceSelect = document.getElementById('outputDeviceSelect');
+        const refreshDevicesBtn = document.getElementById('refreshDevicesBtn');
+        const diagCtxState = document.getElementById('diagCtxState');
+        const diagMicState = document.getElementById('diagMicState');
+        const diagInputRms = document.getElementById('diagInputRms');
+        const diagInputBar = document.getElementById('diagInputBar');
+        const diagOutputRms = document.getElementById('diagOutputRms');
+        const diagOutputBar = document.getElementById('diagOutputBar');
+        const diagWorkletStatus = document.getElementById('diagWorkletStatus');
+        const diagOutputDevice = document.getElementById('diagOutputDevice');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const errorContainer = document.getElementById('errorContainer');
@@ -681,42 +854,313 @@
         
         const canvasCtx = visualizer.getContext('2d');
 
-        // --- 4. Core Audio Functions ---
-        async function initAudio() {
+        // --- 3.5 Device Enumeration & Bluetooth / Output Sink Routing ---
+        async function refreshAudioDevices() {
+            if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') {
+                return;
+            }
             try {
-                state.stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false }, 
-                    video: false 
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const currentIn = inputDeviceSelect.value;
+                const currentOut = outputDeviceSelect.value;
+
+                inputDeviceSelect.innerHTML = '<option value="">System Default Microphone</option>';
+                outputDeviceSelect.innerHTML = '<option value="">System Default Output</option>';
+
+                let inIdx = 1;
+                let outIdx = 1;
+
+                devices.forEach((d) => {
+                    if (d.kind === 'audioinput') {
+                        const opt = document.createElement('option');
+                        opt.value = d.deviceId;
+                        opt.textContent = d.label || `Microphone ${inIdx++}`;
+                        inputDeviceSelect.appendChild(opt);
+                    } else if (d.kind === 'audiooutput') {
+                        const opt = document.createElement('option');
+                        opt.value = d.deviceId;
+                        opt.textContent = d.label || `Speaker / Headphone ${outIdx++}`;
+                        outputDeviceSelect.appendChild(opt);
+                    }
                 });
 
-                state.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
-                
+                if (currentIn && Array.from(inputDeviceSelect.options).some(o => o.value === currentIn)) {
+                    inputDeviceSelect.value = currentIn;
+                }
+                if (currentOut && Array.from(outputDeviceSelect.options).some(o => o.value === currentOut)) {
+                    outputDeviceSelect.value = currentOut;
+                }
+            } catch (err) {
+                console.warn('[VoiceShift] Could not enumerate audio devices:', err);
+            }
+        }
+
+        async function applyOutputDeviceRouting(sinkId, targetCtx = state.audioCtx, targetLimiter = state.limiter, targetStreamDest = state.streamDestination) {
+            if (!targetCtx || !targetLimiter) return;
+
+            const selectedOpt = outputDeviceSelect.options[outputDeviceSelect.selectedIndex];
+            const sinkLabel = selectedOpt ? selectedOpt.textContent : 'System Default Output';
+
+            // 1. Prefer native AudioContext.setSinkId (supported in Chrome 110+ on Windows 11)
+            if (typeof targetCtx.setSinkId === 'function') {
+                try {
+                    await targetCtx.setSinkId(sinkId || '');
+                    if (state.audioBridgeEl) {
+                        state.audioBridgeEl.pause();
+                        state.audioBridgeEl.srcObject = null;
+                    }
+                    if (!state.isConnectedToDestination || targetCtx !== state.audioCtx) {
+                        targetLimiter.connect(targetCtx.destination);
+                        if (targetCtx === state.audioCtx) state.isConnectedToDestination = true;
+                    }
+                    state.activeOutputLabel = sinkId ? `CtxSink: ${sinkLabel}` : 'System Default (Direct)';
+                    updateLiveDiagnosticsUI();
+                    return;
+                } catch (err) {
+                    console.warn('[VoiceShift] AudioContext.setSinkId failed, falling back:', err);
+                }
+            }
+
+            // 2. Fallback: HTMLAudioElement.setSinkId if a non-default sinkId was requested and AudioContext.setSinkId is unavailable
+            if (sinkId && targetStreamDest && typeof HTMLMediaElement !== 'undefined' && typeof HTMLMediaElement.prototype.setSinkId === 'function') {
+                try {
+                    if (!state.audioBridgeEl) {
+                        state.audioBridgeEl = new Audio();
+                        state.audioBridgeEl.autoplay = true;
+                    }
+                    if (state.isConnectedToDestination && targetCtx === state.audioCtx) {
+                        try { targetLimiter.disconnect(targetCtx.destination); } catch (_) {}
+                        state.isConnectedToDestination = false;
+                    }
+                    state.audioBridgeEl.srcObject = targetStreamDest.stream;
+                    await state.audioBridgeEl.setSinkId(sinkId);
+                    await state.audioBridgeEl.play();
+                    state.activeOutputLabel = `MediaSink: ${sinkLabel}`;
+                    updateLiveDiagnosticsUI();
+                    return;
+                } catch (err) {
+                    console.warn('[VoiceShift] HTMLAudioElement.setSinkId fallback failed, routing to default destination:', err);
+                }
+            }
+
+            // 3. Safe Default Fallback: direct connection to AudioContext.destination
+            if (state.audioBridgeEl) {
+                state.audioBridgeEl.pause();
+                state.audioBridgeEl.srcObject = null;
+            }
+            if (!state.isConnectedToDestination || targetCtx !== state.audioCtx) {
+                targetLimiter.connect(targetCtx.destination);
+                if (targetCtx === state.audioCtx) state.isConnectedToDestination = true;
+            }
+            state.activeOutputLabel = 'System Default (Direct)';
+            updateLiveDiagnosticsUI();
+        }
+
+        function computeTimeDomainRms(analyserNode, floatBuffer) {
+            if (!analyserNode || !floatBuffer) return 0;
+            analyserNode.getFloatTimeDomainData(floatBuffer);
+            let sumSq = 0;
+            for (let i = 0; i < floatBuffer.length; i++) {
+                const s = floatBuffer[i];
+                if (Number.isFinite(s)) sumSq += s * s;
+            }
+            return Math.sqrt(sumSq / floatBuffer.length);
+        }
+
+        function updateLiveDiagnosticsUI(inRms = 0, outRms = 0) {
+            const activeCtx = state.audioCtx || state.testAudioCtx;
+            if (activeCtx) {
+                diagCtxState.textContent = `${activeCtx.state} (${Math.round(activeCtx.sampleRate / 1000)}kHz)`;
+                diagCtxState.className = activeCtx.state === 'running'
+                    ? 'text-green-400 font-semibold mt-0.5 truncate'
+                    : 'text-amber-400 font-semibold mt-0.5 truncate';
+            } else {
+                diagCtxState.textContent = 'closed';
+                diagCtxState.className = 'text-gray-400 font-semibold mt-0.5 truncate';
+            }
+
+            const tracks = state.stream ? state.stream.getAudioTracks() : [];
+            if (tracks.length > 0) {
+                const t = tracks[0];
+                const muteLabel = t.muted ? ' (muted)' : '';
+                diagMicState.textContent = `${t.readyState}${t.enabled ? '' : ' (disabled)'}${muteLabel}`;
+                diagMicState.title = t.label || 'Microphone Track';
+                diagMicState.className = (t.readyState === 'live' && t.enabled && !t.muted)
+                    ? 'text-green-400 font-semibold mt-0.5 truncate'
+                    : 'text-amber-400 font-semibold mt-0.5 truncate';
+            } else {
+                diagMicState.textContent = state.isTestingOutput ? '440Hz Test Tone' : 'inactive';
+                diagMicState.className = state.isTestingOutput
+                    ? 'text-emerald-400 font-semibold mt-0.5 truncate'
+                    : 'text-gray-400 font-semibold mt-0.5 truncate';
+            }
+
+            diagInputRms.textContent = inRms.toFixed(3);
+            const inPct = Math.min(100, Math.round(Math.sqrt(inRms) * 140));
+            diagInputBar.style.width = `${inPct}%`;
+
+            diagOutputRms.textContent = outRms.toFixed(3);
+            const outPct = Math.min(100, Math.round(Math.sqrt(outRms) * 140));
+            diagOutputBar.style.width = `${outPct}%`;
+
+            if (state.workletErrorCount > 0) {
+                diagWorkletStatus.textContent = `Err (${state.workletErrorCount}): ${state.lastWorkletError || 'Error'}`;
+                diagWorkletStatus.className = 'text-red-400 font-semibold mt-0.5 truncate';
+            } else {
+                diagWorkletStatus.textContent = activeCtx ? 'Active (0 errs)' : 'Ready (0 errs)';
+                diagWorkletStatus.className = 'text-green-400 font-semibold mt-0.5 truncate';
+            }
+
+            diagOutputDevice.textContent = state.activeOutputLabel;
+            diagOutputDevice.title = state.activeOutputLabel;
+        }
+
+        function attachWorkletDiagnostics(node, label) {
+            if (!node) return;
+            node.addEventListener('processorerror', (err) => {
+                console.error(`[VoiceShift] ${label} AudioWorklet processorerror:`, err);
+                state.workletErrorCount++;
+                state.lastWorkletError = `${label} processorerror`;
+                updateLiveDiagnosticsUI();
+            });
+            node.port.onmessage = (e) => {
+                const data = e.data;
+                if (!data) return;
+                if (data.type === 'ack' || data.type === 'init-ack') {
+                    state.lastAck = data;
+                } else if (data.type === 'processor-error') {
+                    console.error(`[VoiceShift] ${data.processor} internal exception:`, data.message);
+                    state.workletErrorCount++;
+                    state.lastWorkletError = data.message;
+                    updateLiveDiagnosticsUI();
+                }
+            };
+        }
+
+        // --- 4. Core Audio Functions ---
+        async function initAudio() {
+            if (state.isStarting || state.isActive) return;
+            state.isStarting = true;
+            toggleMicBtn.disabled = true;
+            hideError();
+
+            try {
+                // Stop any standalone test tone context before starting live microphone
+                if (state.testAudioCtx) {
+                    try { await state.testAudioCtx.close(); } catch (_) {}
+                    state.testAudioCtx = null;
+                }
+
+                // 1. Create AudioContext IMMEDIATELY inside the user click handler
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) {
+                    throw new Error('Web Audio API is not supported in this browser.');
+                }
+                state.audioCtx = new AudioContextClass({ latencyHint: 'interactive' });
+                state.audioCtx.onstatechange = () => updateLiveDiagnosticsUI();
+
+                // 2. Call and await AudioContext.resume() BEFORE requesting microphone permission
+                await state.audioCtx.resume();
+                if (state.audioCtx.state !== 'running') {
+                    throw new Error(`AudioContext could not start (state: ${state.audioCtx.state}). Please interact with the page and try again.`);
+                }
+
+                // 3. Request microphone access using getUserMedia() with selected deviceId & safe fallback
+                const selectedInputId = inputDeviceSelect.value;
+                const primaryConstraints = {
+                    audio: {
+                        ...(selectedInputId ? { deviceId: { exact: selectedInputId } } : {}),
+                        echoCancellation: false,
+                        autoGainControl: true,
+                        noiseSuppression: true
+                    },
+                    video: false
+                };
+
+                try {
+                    state.stream = await navigator.mediaDevices.getUserMedia(primaryConstraints);
+                } catch (constraintErr) {
+                    console.warn('[VoiceShift] Primary mic constraints rejected, retrying with default audio constraints:', constraintErr);
+                    state.stream = await navigator.mediaDevices.getUserMedia({
+                        audio: selectedInputId ? { deviceId: { ideal: selectedInputId } } : true,
+                        video: false
+                    });
+                }
+
+                // 4. Verify that the microphone track exists and is enabled
+                const audioTracks = state.stream ? state.stream.getAudioTracks() : [];
+                if (audioTracks.length === 0) {
+                    throw new Error('No microphone audio track was returned by the browser.');
+                }
+                const micTrack = audioTracks[0];
+                micTrack.enabled = true;
+                if (micTrack.readyState !== 'live' || !micTrack.enabled) {
+                    throw new Error(`Microphone track is not live (state: ${micTrack.readyState}). Check OS microphone privacy settings.`);
+                }
+
+                micTrack.onended = () => {
+                    console.warn('[VoiceShift] Microphone track ended unexpectedly.');
+                    showError('Microphone was disconnected or stopped by the system.');
+                    stopAudio();
+                };
+                micTrack.onmute = () => updateLiveDiagnosticsUI();
+                micTrack.onunmute = () => updateLiveDiagnosticsUI();
+
+                // Refresh device labels now that permission is granted
+                await refreshAudioDevices();
+
+                // 5. Load AudioWorklet processors & ensure AudioContext remains running
                 const blob = new Blob([pitchProcessorCode], { type: 'application/javascript' });
                 state.workletUrl = URL.createObjectURL(blob);
-
                 await state.audioCtx.audioWorklet.addModule(state.workletUrl);
-                
+
+                if (state.audioCtx.state !== 'running') {
+                    await state.audioCtx.resume();
+                }
+                if (state.audioCtx.state !== 'running') {
+                    throw new Error(`AudioContext is ${state.audioCtx.state} after loading AudioWorklet.`);
+                }
+
+                // 6. Build the Complete Audio Pipeline:
+                // Microphone -> MediaStreamSource -> InputGain -> Dry/Wet Gain -> Pitch Processing -> Master Gain -> Compressor -> Limiter -> Audio Output
                 state.source = state.audioCtx.createMediaStreamSource(state.stream);
-                
-                // Initialize the node with the CURRENT preset parameters to avoid startup pitch drops
+
+                // Input conditioning node centers mono/stereo mic input so both L & R headphone channels receive signal
+                state.inputGain = state.audioCtx.createGain();
+                state.inputGain.gain.value = 1.0;
+                state.inputGain.channelCount = 1;
+                state.inputGain.channelCountMode = 'explicit';
+                state.inputGain.channelInterpretation = 'speakers';
+
+                // Non-blocking side-tap analyser for live Microphone Input RMS
+                state.inputAnalyser = state.audioCtx.createAnalyser();
+                state.inputAnalyser.fftSize = 512;
+                state.inputTimeArray = new Float32Array(state.inputAnalyser.fftSize);
+
+                // Initialize the pitch worklet node with stereo output
                 const targetRatio = parseFloat(pitchSlider.value);
                 const formantRatio = PRESETS[state.currentPreset] ? PRESETS[state.currentPreset].formantRatio : targetRatio;
                 
                 state.pitchNode = new AudioWorkletNode(state.audioCtx, 'pitch-shift-processor', {
+                    numberOfInputs: 1,
+                    numberOfOutputs: 1,
+                    outputChannelCount: [2],
                     processorOptions: {
                         pitchRatio: targetRatio,
                         formantRatio: formantRatio
                     }
                 });
-                state.pitchNode.port.onmessage = (e) => {
-                    if (e.data && (e.data.type === 'ack' || e.data.type === 'init-ack')) {
-                        state.lastAck = e.data;
-                    }
-                };
+                state.workletErrorCount = 0;
+                state.lastWorkletError = null;
+                attachWorkletDiagnostics(state.pitchNode, 'PitchShiftProcessor');
                 
                 state.dryGain = state.audioCtx.createGain();
                 state.wetGain = state.audioCtx.createGain();
+                state.dryGain.gain.value = state.isEffectOn ? 0.0 : 1.0;
+                state.wetGain.gain.value = state.isEffectOn ? 1.0 : 0.0;
+
                 state.masterGain = state.audioCtx.createGain();
+                state.masterGain.gain.value = state.volume;
                 
                 // Output Protection Stage: DynamicsCompressorNode + SmoothLimiterProcessor
                 state.compressor = state.audioCtx.createDynamicsCompressor();
@@ -726,38 +1170,47 @@
                 state.compressor.attack.setValueAtTime(0.001, state.audioCtx.currentTime);
                 state.compressor.release.setValueAtTime(0.080, state.audioCtx.currentTime);
 
-                state.limiter = new AudioWorkletNode(state.audioCtx, 'smooth-limiter-processor');
-                state.analyser = state.audioCtx.createAnalyser();
+                state.limiter = new AudioWorkletNode(state.audioCtx, 'smooth-limiter-processor', {
+                    numberOfInputs: 1,
+                    numberOfOutputs: 1,
+                    outputChannelCount: [2]
+                });
+                attachWorkletDiagnostics(state.limiter, 'SmoothLimiterProcessor');
 
+                // Non-blocking side-tap analyser for Visualizer and Processed Output RMS
+                state.analyser = state.audioCtx.createAnalyser();
                 state.analyser.fftSize = 256;
-                state.masterGain.gain.value = state.volume;
+                state.outputTimeArray = new Float32Array(state.analyser.fftSize);
                 
-                state.source.connect(state.dryGain);
-                state.source.connect(state.wetGain);
+                // Connect pipeline:
+                state.source.connect(state.inputGain);
+                state.inputGain.connect(state.inputAnalyser); // Parallel input tap
+
+                state.inputGain.connect(state.dryGain);
+                state.inputGain.connect(state.wetGain);
 
                 state.wetGain.connect(state.pitchNode);
                 state.pitchNode.connect(state.masterGain);
 
                 state.dryGain.connect(state.masterGain);
 
-                // Route masterGain through compressor and smooth limiter before BOTH outputs
+                // Route masterGain through compressor and smooth limiter
                 state.masterGain.connect(state.compressor);
                 state.compressor.connect(state.limiter);
 
-                // 1. Local Headphone Monitoring (via analyser)
+                // Parallel side-taps from limiter (analyser does NOT sit in series before destination)
                 state.limiter.connect(state.analyser);
-                state.analyser.connect(state.audioCtx.destination);
-                
-                // 2. Processed & Protected MediaStreamAudioDestinationNode for future extension integration
                 state.streamDestination = state.audioCtx.createMediaStreamDestination();
                 state.limiter.connect(state.streamDestination);
 
-                if (state.audioCtx.state === 'suspended') await state.audioCtx.resume();
+                // Connect final output directly to destination / selected Bluetooth sink
+                state.isConnectedToDestination = false;
+                await applyOutputDeviceRouting(outputDeviceSelect.value);
 
-                updateBypassRouting(); 
+                updateBypassRouting();
 
                 updateStatus(true);
-                hideError();
+                updateLiveDiagnosticsUI();
 
                 resizeCanvas();
                 window.addEventListener('resize', resizeCanvas);
@@ -765,24 +1218,58 @@
 
             } catch (err) {
                 console.error("Audio Initialization Error:", err);
-                showError(`Failed to access microphone. Please ensure permissions are granted. (${err.message})`);
+                showError(`Failed to start audio pipeline: ${err.message}`);
                 stopAudio();
+            } finally {
+                state.isStarting = false;
+                toggleMicBtn.disabled = false;
             }
         }
 
         function stopAudio() {
-            if (state.animationId) cancelAnimationFrame(state.animationId);
+            if (state.animationId) {
+                cancelAnimationFrame(state.animationId);
+                state.animationId = null;
+            }
             
-            if (state.stream) state.stream.getTracks().forEach(track => track.stop());
-            if (state.streamDestination) state.streamDestination.stream.getTracks().forEach(track => track.stop());
+            if (state.stream) {
+                state.stream.getTracks().forEach(track => {
+                    track.onended = null;
+                    track.onmute = null;
+                    track.onunmute = null;
+                    track.stop();
+                });
+            }
+            if (state.streamDestination) {
+                state.streamDestination.stream.getTracks().forEach(track => track.stop());
+            }
+            if (state.audioBridgeEl) {
+                state.audioBridgeEl.pause();
+                state.audioBridgeEl.srcObject = null;
+            }
+
+            try { if (state.source) state.source.disconnect(); } catch (_) {}
+            try { if (state.inputGain) state.inputGain.disconnect(); } catch (_) {}
+            try { if (state.dryGain) state.dryGain.disconnect(); } catch (_) {}
+            try { if (state.wetGain) state.wetGain.disconnect(); } catch (_) {}
+            try { if (state.pitchNode) state.pitchNode.disconnect(); } catch (_) {}
+            try { if (state.masterGain) state.masterGain.disconnect(); } catch (_) {}
+            try { if (state.compressor) state.compressor.disconnect(); } catch (_) {}
+            try { if (state.limiter) state.limiter.disconnect(); } catch (_) {}
             
-            if (state.audioCtx && state.audioCtx.state !== 'closed') state.audioCtx.close();
-            if (state.workletUrl) URL.revokeObjectURL(state.workletUrl);
+            if (state.audioCtx && state.audioCtx.state !== 'closed') {
+                state.audioCtx.close().catch(() => {});
+            }
+            if (state.workletUrl) {
+                URL.revokeObjectURL(state.workletUrl);
+            }
 
             state.stream = null;
             state.audioCtx = null;
             state.workletUrl = null;
             state.source = null;
+            state.inputGain = null;
+            state.inputAnalyser = null;
             state.pitchNode = null;
             state.dryGain = null;
             state.wetGain = null;
@@ -791,23 +1278,152 @@
             state.limiter = null;
             state.analyser = null;
             state.streamDestination = null;
+            state.isConnectedToDestination = false;
 
             window.removeEventListener('resize', resizeCanvas);
             canvasCtx.clearRect(0, 0, visualizer.width, visualizer.height);
             
             updateStatus(false);
+            updateLiveDiagnosticsUI(0, 0);
+        }
+
+        // --- 4.5 Real Hardware Audio Output Test (440 Hz Tone through Output Chain) ---
+        async function runAudioOutputTest() {
+            if (state.isTestingOutput) return;
+            state.isTestingOutput = true;
+            testOutputBtn.disabled = true;
+            testOutputText.textContent = 'Playing 440Hz...';
+            hideError();
+
+            try {
+                // Case 1: Microphone is already active — route 440 Hz test tone directly through the active output chain
+                if (state.isActive && state.audioCtx && state.masterGain) {
+                    if (state.audioCtx.state !== 'running') {
+                        await state.audioCtx.resume();
+                    }
+                    const now = state.audioCtx.currentTime;
+                    const osc = state.audioCtx.createOscillator();
+                    const toneGain = state.audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(440, now);
+
+                    // Ensure audible test level even if user turned volume slider very low
+                    const effectiveVol = state.volume < 0.15 ? 0.25 : 0.25;
+                    toneGain.gain.setValueAtTime(0.0001, now);
+                    toneGain.gain.exponentialRampToValueAtTime(effectiveVol, now + 0.03);
+                    toneGain.gain.setValueAtTime(effectiveVol, now + 0.65);
+                    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.75);
+
+                    osc.connect(toneGain);
+                    // Connect into compressor (and masterGain if volume > 0) so tone goes through Compressor -> Limiter -> Output
+                    if (state.volume >= 0.1) {
+                        toneGain.connect(state.masterGain);
+                    } else {
+                        toneGain.connect(state.compressor);
+                    }
+
+                    osc.start(now);
+                    osc.stop(now + 0.78);
+
+                    await new Promise(resolve => setTimeout(resolve, 820));
+                    try { osc.disconnect(); toneGain.disconnect(); } catch (_) {}
+                } else {
+                    // Case 2: Microphone is stopped — create a temporary real AudioContext, build the output chain, and play 440 Hz tone
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    const testCtx = new AudioContextClass({ latencyHint: 'interactive' });
+                    state.testAudioCtx = testCtx;
+
+                    await testCtx.resume();
+                    if (testCtx.state !== 'running') {
+                        throw new Error(`AudioContext could not resume (state: ${testCtx.state}).`);
+                    }
+
+                    const blob = new Blob([pitchProcessorCode], { type: 'application/javascript' });
+                    const tempUrl = URL.createObjectURL(blob);
+                    await testCtx.audioWorklet.addModule(tempUrl);
+
+                    const masterGain = testCtx.createGain();
+                    masterGain.gain.value = Math.max(0.25, state.volume);
+
+                    const compressor = testCtx.createDynamicsCompressor();
+                    compressor.threshold.setValueAtTime(-6.0, testCtx.currentTime);
+                    compressor.knee.setValueAtTime(6.0, testCtx.currentTime);
+                    compressor.ratio.setValueAtTime(20.0, testCtx.currentTime);
+                    compressor.attack.setValueAtTime(0.001, testCtx.currentTime);
+                    compressor.release.setValueAtTime(0.080, testCtx.currentTime);
+
+                    const limiter = new AudioWorkletNode(testCtx, 'smooth-limiter-processor', {
+                        numberOfInputs: 1,
+                        numberOfOutputs: 1,
+                        outputChannelCount: [2]
+                    });
+                    const analyser = testCtx.createAnalyser();
+                    analyser.fftSize = 256;
+                    const timeArr = new Float32Array(analyser.fftSize);
+                    const streamDest = testCtx.createMediaStreamDestination();
+
+                    masterGain.connect(compressor);
+                    compressor.connect(limiter);
+                    limiter.connect(analyser);
+                    limiter.connect(streamDest);
+
+                    await applyOutputDeviceRouting(outputDeviceSelect.value, testCtx, limiter, streamDest);
+
+                    const now = testCtx.currentTime;
+                    const osc = testCtx.createOscillator();
+                    const toneGain = testCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(440, now);
+
+                    toneGain.gain.setValueAtTime(0.0001, now);
+                    toneGain.gain.exponentialRampToValueAtTime(0.25, now + 0.03);
+                    toneGain.gain.setValueAtTime(0.25, now + 0.65);
+                    toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.75);
+
+                    osc.connect(toneGain);
+                    toneGain.connect(masterGain);
+
+                    osc.start(now);
+                    osc.stop(now + 0.78);
+
+                    // Sample live output RMS during the test tone so user can confirm signal flow
+                    const pollInterval = setInterval(() => {
+                        const outRms = computeTimeDomainRms(analyser, timeArr);
+                        updateLiveDiagnosticsUI(0, outRms);
+                    }, 50);
+
+                    await new Promise(resolve => setTimeout(resolve, 820));
+                    clearInterval(pollInterval);
+                    URL.revokeObjectURL(tempUrl);
+
+                    if (state.testAudioCtx === testCtx) {
+                        await testCtx.close().catch(() => {});
+                        state.testAudioCtx = null;
+                    }
+                    updateLiveDiagnosticsUI(0, 0);
+                }
+            } catch (err) {
+                console.error('[VoiceShift] Audio Output Test failed:', err);
+                showError(`Audio Output Test Error: ${err.message}`);
+            } finally {
+                state.isTestingOutput = false;
+                testOutputBtn.disabled = false;
+                testOutputText.textContent = 'Test Audio Output';
+            }
         }
 
         function updateBypassRouting() {
-            if (!state.audioCtx) return;
+            if (!state.audioCtx || !state.wetGain || !state.dryGain) return;
             const t = state.audioCtx.currentTime;
-            const transitionTime = 0.05; 
+            const transitionTime = 0.03;
+            state.wetGain.gain.cancelScheduledValues(t);
+            state.dryGain.gain.cancelScheduledValues(t);
             if (state.isEffectOn) {
-                state.wetGain.gain.setTargetAtTime(1, t, transitionTime);
-                state.dryGain.gain.setTargetAtTime(0, t, transitionTime);
+                state.wetGain.gain.setTargetAtTime(1.0, t, transitionTime);
+                state.dryGain.gain.setTargetAtTime(0.0, t, transitionTime);
             } else {
-                state.wetGain.gain.setTargetAtTime(0, t, transitionTime);
-                state.dryGain.gain.setTargetAtTime(1, t, transitionTime);
+                state.wetGain.gain.setTargetAtTime(0.0, t, transitionTime);
+                state.dryGain.gain.setTargetAtTime(1.0, t, transitionTime);
             }
         }
 
@@ -842,6 +1458,11 @@
         function drawVisualizer() {
             if (!state.isActive || !state.analyser) return;
             state.animationId = requestAnimationFrame(drawVisualizer);
+
+            // Compute live Input and Output RMS levels for hardware diagnostics
+            const inRms = computeTimeDomainRms(state.inputAnalyser, state.inputTimeArray);
+            const outRms = computeTimeDomainRms(state.analyser, state.outputTimeArray);
+            updateLiveDiagnosticsUI(inRms, outRms);
 
             const bufferLength = state.analyser.frequencyBinCount;
             if (!state.dataArray || state.dataArray.length !== bufferLength) {
@@ -923,6 +1544,30 @@
         }
 
         toggleMicBtn.addEventListener('click', () => state.isActive ? stopAudio() : initAudio());
+        testOutputBtn.addEventListener('click', () => runAudioOutputTest());
+        refreshDevicesBtn.addEventListener('click', () => refreshAudioDevices());
+
+        outputDeviceSelect.addEventListener('change', async (e) => {
+            if (state.isActive && state.audioCtx) {
+                await applyOutputDeviceRouting(e.target.value);
+            } else {
+                const selectedOpt = outputDeviceSelect.options[outputDeviceSelect.selectedIndex];
+                state.activeOutputLabel = e.target.value && selectedOpt ? selectedOpt.textContent : 'Default Sink';
+                updateLiveDiagnosticsUI();
+            }
+        });
+
+        inputDeviceSelect.addEventListener('change', async () => {
+            if (state.isActive) {
+                stopAudio();
+                await initAudio();
+            }
+        });
+
+        if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+            navigator.mediaDevices.addEventListener('devicechange', () => refreshAudioDevices());
+        }
+
         presetCards.forEach(card => card.addEventListener('click', () => setPreset(card.dataset.preset)));
 
         volumeSlider.addEventListener('input', (e) => {
@@ -968,7 +1613,9 @@
             applyCurrentPitch();
         });
 
-        setPreset('male'); 
+        setPreset('male');
+        refreshAudioDevices();
+        updateLiveDiagnosticsUI(0, 0);
 
         // --- 7. DSP Diagnostics & Automated Tests ---
         const runTestsBtn = document.getElementById('runTestsBtn');

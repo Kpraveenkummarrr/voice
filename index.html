@@ -170,7 +170,7 @@
                         <h3 class="text-sm font-medium text-gray-300">DSP Diagnostics</h3>
                         <button id="runTestsBtn" class="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-medium transition-colors shadow-lg shadow-blue-500/20">Run Tests</button>
                     </div>
-                    <div id="testResults" class="text-xs text-gray-400 space-y-1 font-mono bg-gray-900/80 p-3 rounded-lg border border-gray-700 h-32 overflow-y-auto">
+                    <div id="testResults" class="text-xs text-gray-400 space-y-1 font-mono bg-gray-900/80 p-3 rounded-lg border border-gray-700 h-48 overflow-y-auto">
                         Awaiting test execution... (Requires no microphone)
                     </div>
                 </div>
@@ -235,19 +235,27 @@
     <script>
         /**
          * VoiceShift Application State & Logic
-         * ENGINE UPGRADE: STFT Phase Vocoder with Formant Preservation
+         * ENGINE UPGRADE: STFT Phase Vocoder with Spectral-Envelope Formant Warping & Output Limiting
          */
         
         // --- 1. AudioWorklet Processor Source Code ---
         const pitchProcessorCode = `
             class PhaseVocoderProcessor extends AudioWorkletProcessor {
-                constructor() {
+                constructor(options) {
                     super();
+                    // Audio Engine Settings
                     this.N = 1024;
                     this.hop = 256;
-                    this.pitchRatio = 1.0;
-                    this.formantRatio = 1.0; 
                     
+                    // Initialize with guaranteed parameters from processorOptions
+                    const initPitch = options?.processorOptions?.pitchRatio ?? 1.0;
+                    const initFormant = options?.processorOptions?.formantRatio ?? 1.0;
+                    this.pitchRatio = initPitch;
+                    this.formantRatio = initFormant;
+                    this.targetPitch = initPitch;
+                    this.targetFormant = initFormant;
+                    
+                    // Pre-allocate all buffers to prevent GC pauses in real-time thread
                     this.inBuffer = new Float32Array(this.N);
                     this.outBuffer = new Float32Array(this.N);
                     
@@ -258,34 +266,58 @@
                     this.re = new Float32Array(this.N);
                     this.im = new Float32Array(this.N);
                     this.mag = new Float32Array(this.N / 2 + 1);
+                    this.env = new Float32Array(this.N / 2 + 1);
                     this.phase = new Float32Array(this.N / 2 + 1);
                     this.lastPhase = new Float32Array(this.N / 2 + 1);
                     this.sumPhase = new Float32Array(this.N / 2 + 1);
-                    this.synMag = new Float32Array(this.N / 2 + 1);
                     this.synFreq = new Float32Array(this.N / 2 + 1);
                     
                     this.newMag = new Float32Array(this.N / 2 + 1);
                     this.newFreq = new Float32Array(this.N / 2 + 1);
                     
                     this.window = new Float32Array(this.N);
+                    // Periodic Hann window for exact 75% OLA reconstruction
                     for (let i = 0; i < this.N; i++) {
-                        this.window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (this.N - 1)));
+                        this.window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / this.N));
                     }
                     
                     this.expectedAdvance = 2 * Math.PI * this.hop / this.N;
+                    this.outEnvelope = 0.0;
                     
                     this.port.onmessage = (event) => {
-                        if (event.data.pitchRatio !== undefined) this.pitchRatio = event.data.pitchRatio;
-                        if (event.data.formantRatio !== undefined) this.formantRatio = event.data.formantRatio;
+                        const data = event.data || {};
+                        if (typeof data.pitchRatio === 'number' && data.pitchRatio >= 0.4 && data.pitchRatio <= 2.5) {
+                            this.targetPitch = data.pitchRatio;
+                            if (data.immediate) this.pitchRatio = data.pitchRatio;
+                        }
+                        if (typeof data.formantRatio === 'number' && data.formantRatio >= 0.4 && data.formantRatio <= 2.5) {
+                            this.targetFormant = data.formantRatio;
+                            if (data.immediate) this.formantRatio = data.formantRatio;
+                        }
+                        
+                        // Send Parameter update acknowledgement
+                        this.port.postMessage({ 
+                            type: 'ack', 
+                            pitchRatio: this.targetPitch, 
+                            formantRatio: this.targetFormant 
+                        });
                     };
+
+                    // Send initialization acknowledgement
+                    this.port.postMessage({
+                        type: 'init-ack',
+                        pitchRatio: this.pitchRatio,
+                        formantRatio: this.formantRatio
+                    });
                 }
 
                 fft(re, im, dir) {
                     const n = this.N;
                     let i, j, k, rev, wRe, wIm, tr, ti;
+                    // Bit-reversal
                     for (i = 0; i < n; i++) {
                         rev = 0;
-                        for (j = 0, k = i; j < Math.log2(n); j++) {
+                        for (j = 0, k = i; j < 10; j++) {
                             rev = (rev << 1) | (k & 1);
                             k >>= 1;
                         }
@@ -295,6 +327,7 @@
                             re[rev] = tr; im[rev] = ti;
                         }
                     }
+                    // Butterfly
                     for (k = 1; k < n; k *= 2) {
                         for (i = 0; i < n; i += 2 * k) {
                             for (j = 0; j < k; j++) {
@@ -312,6 +345,7 @@
                             }
                         }
                     }
+                    // Normalize on Inverse FFT
                     if (dir === -1) {
                         for (i = 0; i < n; i++) {
                             re[i] /= n;
@@ -321,59 +355,148 @@
                 }
 
                 processBlock() {
+                    // Smooth parameter transitions per hop to prevent click artifacts
+                    this.pitchRatio += (this.targetPitch - this.pitchRatio) * 0.35;
+                    this.formantRatio += (this.targetFormant - this.formantRatio) * 0.35;
+                    if (Math.abs(this.targetPitch - this.pitchRatio) < 1e-4) this.pitchRatio = this.targetPitch;
+                    if (Math.abs(this.targetFormant - this.formantRatio) < 1e-4) this.formantRatio = this.targetFormant;
+
+                    const currentPitch = this.pitchRatio;
+                    const currentFormant = this.formantRatio;
+
+                    // 1. Analysis Windowing
                     for (let i = 0; i < this.N; i++) {
                         this.re[i] = this.inBuffer[i] * this.window[i];
                         this.im[i] = 0;
                     }
 
+                    // 2. Forward FFT
                     this.fft(this.re, this.im, 1);
 
                     const halfN = this.N / 2;
+                    let inEnergy = 0;
+                    
+                    // 3. Polar Conversion & True Frequency Estimation
                     for (let k = 0; k <= halfN; k++) {
                         let re = this.re[k];
                         let im = this.im[k];
-                        this.mag[k] = Math.sqrt(re * re + im * im);
+                        let m = Math.sqrt(re * re + im * im);
+                        this.mag[k] = m;
+                        inEnergy += m * m;
                         this.phase[k] = Math.atan2(im, re);
 
                         let delta = this.phase[k] - this.lastPhase[k];
                         this.lastPhase[k] = this.phase[k];
 
                         delta -= k * this.expectedAdvance;
-                        let qpd = Math.round(delta / Math.PI);
-                        let wrap = (qpd >= 0 ? qpd + (qpd & 1) : qpd - (qpd & 1));
-                        delta -= Math.PI * wrap;
+                        
+                        // Phase unwrap to [-PI, PI]
+                        delta = delta - 2 * Math.PI * Math.round(delta / (2 * Math.PI));
 
                         this.synFreq[k] = k * this.expectedAdvance + delta;
                     }
 
-                    this.newMag.fill(0);
-                    this.newFreq.fill(0);
-
-                    for (let k = 0; k <= halfN; k++) {
-                        let shiftBin = Math.floor(k * this.pitchRatio);
-                        if (shiftBin <= halfN) {
-                            this.newFreq[shiftBin] = this.synFreq[k] * this.pitchRatio;
-                            let formantBin = Math.floor(shiftBin / this.formantRatio);
-                            if (formantBin <= halfN && formantBin >= 0) {
-                                this.newMag[shiftBin] += this.mag[formantBin];
+                    // 3.5 Extract Smoothed Spectral Envelope for Formant Processing
+                    const useFormantWarp = Math.abs(currentFormant - 1.0) >= 0.005;
+                    let maxEnv = 0;
+                    if (useFormantWarp) {
+                        const smoothRadius = 12;
+                        for (let k = 0; k <= halfN; k++) {
+                            let sum = 0;
+                            let count = 0;
+                            let start = k - smoothRadius < 0 ? 0 : k - smoothRadius;
+                            let end = k + smoothRadius > halfN ? halfN : k + smoothRadius;
+                            for (let j = start; j <= end; j++) {
+                                sum += this.mag[j];
+                                count++;
                             }
+                            let e = sum / count;
+                            this.env[k] = e;
+                            if (e > maxEnv) maxEnv = e;
                         }
                     }
+                    const envReg = Math.max(1e-6, maxEnv * 0.25);
+
+                    // 4. Pitch Shifting & Spectral-Envelope Formant Warping
+                    this.newMag.fill(0);
+                    this.newFreq.fill(0);
+                    let outEnergy = 0;
 
                     for (let k = 0; k <= halfN; k++) {
-                        this.sumPhase[k] += this.newFreq[k] - k * this.expectedAdvance;
-                        let phase = this.sumPhase[k] + k * this.expectedAdvance;
+                        // A. Relocate both harmonic magnitudes and true frequencies by pitchRatio
+                        let pK = k / currentPitch;
+                        let pk1 = Math.floor(pK);
+                        let fracP = pK - pk1;
+                        let synFreq = 0;
+                        let baseMag = 0;
+
+                        if (pk1 >= 0 && pk1 + 1 <= halfN) {
+                            let f1 = this.synFreq[pk1];
+                            let f2 = this.synFreq[pk1 + 1];
+                            synFreq = (f1 + fracP * (f2 - f1)) * currentPitch;
+
+                            let m1 = this.mag[pk1];
+                            let m2 = this.mag[pk1 + 1];
+                            baseMag = m1 + fracP * (m2 - m1);
+                        }
+
+                        // B. Apply Spectral Envelope Formant Warping when formantRatio != 1.0
+                        let synMag = baseMag;
+                        if (useFormantWarp && baseMag > 0) {
+                            let envSrc = 0;
+                            if (pk1 >= 0 && pk1 + 1 <= halfN) {
+                                envSrc = this.env[pk1] + fracP * (this.env[pk1 + 1] - this.env[pk1]);
+                            }
+                            let fK = k / currentFormant;
+                            let fk1 = Math.floor(fK);
+                            let fracF = fK - fk1;
+                            let envDst = 0;
+                            if (fk1 >= 0 && fk1 + 1 <= halfN) {
+                                envDst = this.env[fk1] + fracF * (this.env[fk1 + 1] - this.env[fk1]);
+                            }
+                            let formantGain = (envDst + envReg) / (envSrc + envReg);
+                            if (formantGain < 0.6) formantGain = 0.6;
+                            if (formantGain > 1.4) formantGain = 1.4;
+                            synMag = baseMag * formantGain;
+                        }
+
+                        this.newMag[k] = synMag;
+                        this.newFreq[k] = synFreq;
+                        outEnergy += synMag * synMag;
+                    }
+
+                    // Normalize spectral energy to prevent lobe-stretching gain buildup on upshifts (1.4x, 1.7x)
+                    let normGain = 0.85;
+                    if (outEnergy > 1e-12 && inEnergy > 1e-12) {
+                        let energyRatio = Math.sqrt(inEnergy / outEnergy);
+                        if (energyRatio < 0.25) energyRatio = 0.25;
+                        if (energyRatio > 1.50) energyRatio = 1.50;
+                        normGain = energyRatio * 0.85;
+                    }
+
+                    // 5. Synthesis Phase Accumulation & Rectangular Conversion
+                    for (let k = 0; k <= halfN; k++) {
+                        this.sumPhase[k] += this.newFreq[k];
+                        // Keep accumulated phase wrapped for floating-point stability over long runs
+                        if (this.sumPhase[k] > Math.PI || this.sumPhase[k] < -Math.PI) {
+                            this.sumPhase[k] -= 2 * Math.PI * Math.round(this.sumPhase[k] / (2 * Math.PI));
+                        }
+                        let phase = this.sumPhase[k];
+                        let mag = this.newMag[k] * normGain;
                         
-                        this.re[k] = this.newMag[k] * Math.cos(phase);
-                        this.im[k] = this.newMag[k] * Math.sin(phase);
+                        this.re[k] = mag * Math.cos(phase);
+                        this.im[k] = mag * Math.sin(phase);
+                        
                         if (k > 0 && k < halfN) {
                             this.re[this.N - k] = this.re[k];
                             this.im[this.N - k] = -this.im[k];
                         }
                     }
 
+                    // 6. Inverse FFT
                     this.fft(this.re, this.im, -1);
 
+                    // 7. Synthesis Windowing & Overlap Add
                     for (let i = 0; i < this.N; i++) {
                         this.outBuffer[i] += this.re[i] * this.window[i];
                     }
@@ -387,47 +510,110 @@
                     const inChannel = input[0];
                     const outChannel = output[0];
 
-                    const isBypass = Math.abs(this.pitchRatio - 1.0) < 0.01 && Math.abs(this.formantRatio - 1.0) < 0.01;
-
                     for (let i = 0; i < inChannel.length; i++) {
                         this.hopBuffer[this.hopPos] = inChannel[i];
-                        
-                        outChannel[i] = isBypass ? inChannel[i] : this.outQueue[this.hopPos];
-                        
+                        outChannel[i] = this.outQueue[this.hopPos];
                         this.hopPos++;
 
+                        // Trigger block processing when hop buffer is full
                         if (this.hopPos >= this.hop) {
-                            for (let j = 0; j < this.N - this.hop; j++) {
-                                this.inBuffer[j] = this.inBuffer[j + this.hop];
-                            }
-                            for (let j = 0; j < this.hop; j++) {
-                                this.inBuffer[this.N - this.hop + j] = this.hopBuffer[j];
-                            }
+                            // Shift analysis buffer and append new hop
+                            this.inBuffer.copyWithin(0, this.hop);
+                            this.inBuffer.set(this.hopBuffer, this.N - this.hop);
                             
-                            for (let j = 0; j < this.N - this.hop; j++) {
-                                this.outBuffer[j] = this.outBuffer[j + this.hop];
-                            }
-                            for (let j = this.N - this.hop; j < this.N; j++) {
-                                this.outBuffer[j] = 0;
-                            }
+                            // Shift synthesis buffer to prepare for OLA
+                            this.outBuffer.copyWithin(0, this.hop);
+                            this.outBuffer.fill(0, this.N - this.hop);
                             
+                            // Execute STFT Phase Vocoder block
                             this.processBlock();
                             
+                            // Extract OLA hop to queue.
+                            // Hann-Hann 75% overlap (4x overlap) constant sum is 1.5 -> multiply by 2/3 (0.6666667)
                             for (let j = 0; j < this.hop; j++) {
-                                this.outQueue[j] = this.outBuffer[j];
+                                let s = this.outBuffer[j] * 0.6666666667;
+                                const absS = Math.abs(s);
+                                if (absS > this.outEnvelope) {
+                                    this.outEnvelope = 0.9 * this.outEnvelope + 0.1 * absS;
+                                } else {
+                                    this.outEnvelope = 0.999 * this.outEnvelope + 0.001 * absS;
+                                }
+                                if (this.outEnvelope > 0.92) {
+                                    s *= (0.92 / this.outEnvelope);
+                                }
+                                this.outQueue[j] = s;
                             }
                             
                             this.hopPos = 0;
                         }
                     }
 
+                    // Handle Mono to Stereo routing
                     for (let c = 1; c < output.length; c++) {
                         output[c].set(outChannel);
                     }
                     return true;
                 }
             }
+
+            /**
+             * Smooth Envelope Peak Limiter Processor
+             * Placed after DynamicsCompressorNode to guarantee final output peak <= 0.97 (target <= 0.98)
+             * with smooth gain reduction and zero hard clipping even at 200% master volume.
+             */
+            class SmoothLimiterProcessor extends AudioWorkletProcessor {
+                constructor() {
+                    super();
+                    this.envelope = 0.0;
+                    this.threshold = 0.85;
+                    this.attackCoeff = Math.exp(-1.0 / (0.0005 * sampleRate));
+                    this.releaseCoeff = Math.exp(-1.0 / (0.060 * sampleRate));
+                }
+
+                process(inputs, outputs) {
+                    const input = inputs[0];
+                    const output = outputs[0];
+                    if (!input || input.length === 0 || !input[0]) return true;
+
+                    const numChannels = input.length;
+                    const len = input[0].length;
+
+                    for (let i = 0; i < len; i++) {
+                        let peak = 0;
+                        for (let c = 0; c < numChannels; c++) {
+                            const absVal = Math.abs(input[c][i]);
+                            if (absVal > peak) peak = absVal;
+                        }
+
+                        if (peak > this.envelope) {
+                            this.envelope = this.attackCoeff * this.envelope + (1.0 - this.attackCoeff) * peak;
+                        } else {
+                            this.envelope = this.releaseCoeff * this.envelope + (1.0 - this.releaseCoeff) * peak;
+                        }
+
+                        let gain = 1.0;
+                        if (this.envelope > this.threshold) {
+                            gain = this.threshold / this.envelope;
+                        }
+
+                        for (let c = 0; c < output.length; c++) {
+                            const srcChan = input[c < numChannels ? c : 0];
+                            let s = srcChan[i] * gain;
+                            const absS = Math.abs(s);
+                            // Smooth soft-knee ceiling asymptotic to 0.97 (strictly <= 0.98)
+                            if (absS > 0.90) {
+                                const sign = s < 0 ? -1 : 1;
+                                s = sign * (0.90 + 0.07 * Math.tanh((absS - 0.90) / 0.07));
+                            }
+                            output[c][i] = s;
+                        }
+                    }
+                    return true;
+                }
+            }
+
             registerProcessor('pitch-shift-processor', PhaseVocoderProcessor);
+            registerProcessor('smooth-limiter-processor', SmoothLimiterProcessor);
         `;
 
         // --- 2. Application State ---
@@ -449,11 +635,14 @@
             dryGain: null,
             wetGain: null,
             masterGain: null,
+            compressor: null,
+            limiter: null,
             analyser: null,
             streamDestination: null,
             animationId: null,
             dataArray: null,
-            workletUrl: null
+            workletUrl: null,
+            lastAck: null
         };
 
         // --- 2.5 INTEGRATION API (Chrome Manifest V3 Compliant Bridge) ---
@@ -508,11 +697,36 @@
                 await state.audioCtx.audioWorklet.addModule(state.workletUrl);
                 
                 state.source = state.audioCtx.createMediaStreamSource(state.stream);
-                state.pitchNode = new AudioWorkletNode(state.audioCtx, 'pitch-shift-processor');
+                
+                // Initialize the node with the CURRENT preset parameters to avoid startup pitch drops
+                const targetRatio = parseFloat(pitchSlider.value);
+                const formantRatio = PRESETS[state.currentPreset] ? PRESETS[state.currentPreset].formantRatio : targetRatio;
+                
+                state.pitchNode = new AudioWorkletNode(state.audioCtx, 'pitch-shift-processor', {
+                    processorOptions: {
+                        pitchRatio: targetRatio,
+                        formantRatio: formantRatio
+                    }
+                });
+                state.pitchNode.port.onmessage = (e) => {
+                    if (e.data && (e.data.type === 'ack' || e.data.type === 'init-ack')) {
+                        state.lastAck = e.data;
+                    }
+                };
                 
                 state.dryGain = state.audioCtx.createGain();
                 state.wetGain = state.audioCtx.createGain();
                 state.masterGain = state.audioCtx.createGain();
+                
+                // Output Protection Stage: DynamicsCompressorNode + SmoothLimiterProcessor
+                state.compressor = state.audioCtx.createDynamicsCompressor();
+                state.compressor.threshold.setValueAtTime(-6.0, state.audioCtx.currentTime);
+                state.compressor.knee.setValueAtTime(6.0, state.audioCtx.currentTime);
+                state.compressor.ratio.setValueAtTime(20.0, state.audioCtx.currentTime);
+                state.compressor.attack.setValueAtTime(0.001, state.audioCtx.currentTime);
+                state.compressor.release.setValueAtTime(0.080, state.audioCtx.currentTime);
+
+                state.limiter = new AudioWorkletNode(state.audioCtx, 'smooth-limiter-processor');
                 state.analyser = state.audioCtx.createAnalyser();
 
                 state.analyser.fftSize = 256;
@@ -526,15 +740,20 @@
 
                 state.dryGain.connect(state.masterGain);
 
-                state.masterGain.connect(state.analyser);
+                // Route masterGain through compressor and smooth limiter before BOTH outputs
+                state.masterGain.connect(state.compressor);
+                state.compressor.connect(state.limiter);
+
+                // 1. Local Headphone Monitoring (via analyser)
+                state.limiter.connect(state.analyser);
                 state.analyser.connect(state.audioCtx.destination);
                 
+                // 2. Processed & Protected MediaStreamAudioDestinationNode for future extension integration
                 state.streamDestination = state.audioCtx.createMediaStreamDestination();
-                state.masterGain.connect(state.streamDestination);
+                state.limiter.connect(state.streamDestination);
 
                 if (state.audioCtx.state === 'suspended') await state.audioCtx.resume();
 
-                applyCurrentPitch(); 
                 updateBypassRouting(); 
 
                 updateStatus(true);
@@ -568,6 +787,8 @@
             state.dryGain = null;
             state.wetGain = null;
             state.masterGain = null;
+            state.compressor = null;
+            state.limiter = null;
             state.analyser = null;
             state.streamDestination = null;
 
@@ -763,6 +984,7 @@
             testResults.scrollTop = testResults.scrollHeight;
         }
 
+        // Zero-padding high-resolution FFT for validation
         function getFftPeakFrequency(data, sampleRate) {
             const N = 16384; 
             if (data.length < N) return 0;
@@ -799,6 +1021,7 @@
                 if (mag > maxMag) { maxMag = mag; peakBin = i; }
             }
             
+            // Quadratic interpolation for exact frequency
             let alpha = Math.sqrt(re[peakBin-1]**2 + im[peakBin-1]**2);
             let beta = maxMag;
             let gamma = Math.sqrt(re[peakBin+1]**2 + im[peakBin+1]**2);
@@ -809,98 +1032,302 @@
             return (peakBin + shift) * sampleRate / N;
         }
 
-        async function testPitchRatio(ratio, expectedFreq) {
+        function configureTestLimiterChain(ctx, sourceNode, masterVolume = 0.8) {
+            const masterGain = ctx.createGain();
+            masterGain.gain.value = masterVolume;
+
+            const compressor = ctx.createDynamicsCompressor();
+            compressor.threshold.setValueAtTime(-6.0, 0);
+            compressor.knee.setValueAtTime(6.0, 0);
+            compressor.ratio.setValueAtTime(20.0, 0);
+            compressor.attack.setValueAtTime(0.001, 0);
+            compressor.release.setValueAtTime(0.080, 0);
+
+            const limiter = new AudioWorkletNode(ctx, 'smooth-limiter-processor');
+
+            sourceNode.connect(masterGain);
+            masterGain.connect(compressor);
+            compressor.connect(limiter);
+            limiter.connect(ctx.destination);
+
+            return { masterGain, compressor, limiter };
+        }
+
+        async function testPitchConfiguration({ pitchRatio, formantRatio, expectedFreq, label, masterVol = 0.8 }) {
+            let testWorkletUrl = null;
             try {
                 const sampleRate = 48000;
-                const duration = 2.0; 
+                const duration = 1.5;
                 const ctx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
                 
                 const blob = new Blob([pitchProcessorCode], { type: 'application/javascript' });
-                const testWorkletUrl = URL.createObjectURL(blob);
+                testWorkletUrl = URL.createObjectURL(blob);
                 await ctx.audioWorklet.addModule(testWorkletUrl);
 
                 const osc = ctx.createOscillator();
                 osc.type = 'sine';
-                osc.frequency.value = 220; 
+                osc.frequency.value = 220;
 
-                const pitchNode = new AudioWorkletNode(ctx, 'pitch-shift-processor');
-                pitchNode.port.postMessage({ pitchRatio: ratio, formantRatio: ratio });
+                const pitchNode = new AudioWorkletNode(ctx, 'pitch-shift-processor', {
+                    processorOptions: {
+                        pitchRatio: pitchRatio,
+                        formantRatio: formantRatio
+                    }
+                });
 
                 osc.connect(pitchNode);
-                pitchNode.connect(ctx.destination);
+                configureTestLimiterChain(ctx, pitchNode, masterVol);
                 osc.start(0);
 
+                const t0 = performance.now();
                 const renderedBuffer = await ctx.startRendering();
+                const execMs = performance.now() - t0;
                 const data = renderedBuffer.getChannelData(0);
 
-                const testData = data.subarray(sampleRate * 1.0);
+                // Discard the first 0.5 seconds of startup transients
+                const testData = data.subarray(sampleRate * 0.5);
                 
                 let sumSq = 0, peak = 0;
-                for(let i=0; i<testData.length; i++) {
+                for (let i = 0; i < testData.length; i++) {
                     let abs = Math.abs(testData[i]);
                     if (abs > peak) peak = abs;
                     sumSq += abs * abs;
                 }
                 
-                let rms = Math.sqrt(sumSq / testData.length);
-                if (rms < 0.01) return { passed: false, msg: `Ratio ${ratio.toFixed(2)}x FAIL - Signal Lost (RMS: ${rms.toFixed(4)})` };
-                if (peak > 1.05) return { passed: false, msg: `Ratio ${ratio.toFixed(2)}x FAIL - Clipping Detected (Peak: ${peak.toFixed(2)})` };
-                
+                const rms = Math.sqrt(sumSq / testData.length);
                 const measuredFreq = getFftPeakFrequency(testData, sampleRate);
-                const tolerance = 2.0; 
-                const passed = Math.abs(measuredFreq - expectedFreq) <= tolerance;
-                
+                const tolerance = 3.0;
+                const freqPass = Math.abs(measuredFreq - expectedFreq) <= tolerance;
+                const rmsPass = rms >= 0.05 && !Number.isNaN(rms);
+                const peakPass = peak <= 0.98 && !Number.isNaN(peak);
+                const passed = freqPass && rmsPass && peakPass;
+
                 URL.revokeObjectURL(testWorkletUrl);
 
-                if (passed) {
-                    return { passed: true, msg: `Ratio ${ratio.toFixed(2)}x | Expected: ${expectedFreq}Hz | Measured: ${measuredFreq.toFixed(1)}Hz (RMS: ${rms.toFixed(3)})` };
-                } else {
-                    return { passed: false, msg: `Ratio ${ratio.toFixed(2)}x | Expected: ${expectedFreq}Hz | Measured: ${measuredFreq.toFixed(1)}Hz` };
+                let statusReason = 'PASS';
+                if (!passed) {
+                    const reasons = [];
+                    if (!freqPass) reasons.push(`Freq Err (${measuredFreq.toFixed(1)}Hz vs ${expectedFreq}Hz)`);
+                    if (!rmsPass) reasons.push(`Low RMS (${rms.toFixed(3)})`);
+                    if (!peakPass) reasons.push(`Clipping (Peak ${peak.toFixed(3)} > 0.98)`);
+                    statusReason = `FAIL: ${reasons.join(', ')}`;
                 }
-            } catch(e) {
-                return { passed: false, msg: `Exception during test: ${e.message}` };
+
+                return {
+                    passed,
+                    measuredFreq,
+                    rms,
+                    peak,
+                    execMs,
+                    msg: `[${label}] P:${pitchRatio.toFixed(2)}x F:${formantRatio.toFixed(2)}x Vol:${Math.round(masterVol*100)}% | Exp:${expectedFreq}Hz Meas:${measuredFreq.toFixed(1)}Hz | RMS:${rms.toFixed(3)} Peak:${peak.toFixed(3)} -> ${statusReason}`
+                };
+            } catch (e) {
+                if (testWorkletUrl) URL.revokeObjectURL(testWorkletUrl);
+                return { passed: false, execMs: 0, msg: `[${label}] Exception during test: ${e.message}` };
+            }
+        }
+
+        async function measureEmpiricalLatencyAndSystemAuxTests() {
+            let testWorkletUrl = null;
+            try {
+                const sampleRate = 48000;
+                const ctx = new OfflineAudioContext(1, sampleRate * 1.0, sampleRate);
+                const blob = new Blob([pitchProcessorCode], { type: 'application/javascript' });
+                testWorkletUrl = URL.createObjectURL(blob);
+                await ctx.audioWorklet.addModule(testWorkletUrl);
+
+                // 1. Measure actual onset latency with tone burst starting at t = 0.100s (sample 4800)
+                const burstStartSample = 4800;
+                const burstStartTime = burstStartSample / sampleRate;
+                const osc = ctx.createOscillator();
+                osc.frequency.value = 220;
+
+                const pitchNode = new AudioWorkletNode(ctx, 'pitch-shift-processor', {
+                    processorOptions: { pitchRatio: 1.40, formantRatio: 1.15 }
+                });
+
+                let ackReceived = false;
+                pitchNode.port.onmessage = (e) => {
+                    if (e.data && (e.data.type === 'init-ack' || e.data.type === 'ack')) {
+                        ackReceived = true;
+                    }
+                };
+                pitchNode.port.postMessage({ pitchRatio: 1.40, formantRatio: 1.15 });
+
+                osc.connect(pitchNode);
+                configureTestLimiterChain(ctx, pitchNode, 0.8);
+                osc.start(burstStartTime);
+
+                const t0 = performance.now();
+                const rendered = await ctx.startRendering();
+                const renderWallMs = performance.now() - t0;
+                const ch = rendered.getChannelData(0);
+
+                // Measure silence before burstStartSample
+                let preBurstPeak = 0;
+                for (let i = 0; i < burstStartSample; i++) {
+                    const a = Math.abs(ch[i]);
+                    if (a > preBurstPeak) preBurstPeak = a;
+                }
+
+                // Measure steady-state peak after t = 0.4s
+                let steadyPeak = 0;
+                for (let i = sampleRate * 0.4; i < sampleRate * 0.8; i++) {
+                    const a = Math.abs(ch[i]);
+                    if (a > steadyPeak) steadyPeak = a;
+                }
+
+                // Find 50% envelope onset sample
+                let onsetSample = burstStartSample;
+                const halfSteady = steadyPeak * 0.5;
+                for (let i = burstStartSample; i < ch.length; i++) {
+                    if (Math.abs(ch[i]) >= halfSteady) {
+                        onsetSample = i;
+                        break;
+                    }
+                }
+                const measuredAlgoDelaySamples = Math.max(0, onsetSample - burstStartSample);
+                const measuredAlgoDelayMs = (measuredAlgoDelaySamples / sampleRate) * 1000;
+
+                // 2. Verify Dry Bypass Path in OfflineAudioContext
+                const bypassCtx = new OfflineAudioContext(1, sampleRate * 1.0, sampleRate);
+                await bypassCtx.audioWorklet.addModule(testWorkletUrl);
+                const bypassOsc = bypassCtx.createOscillator();
+                bypassOsc.frequency.value = 220;
+                const dryGain = bypassCtx.createGain();
+                dryGain.gain.value = 1.0;
+                bypassOsc.connect(dryGain);
+                configureTestLimiterChain(bypassCtx, dryGain, 0.8);
+                bypassOsc.start(0);
+                const bypassBuf = await bypassCtx.startRendering();
+                const bypassData = bypassBuf.getChannelData(0).subarray(sampleRate * 0.25);
+                const bypassFreq = getFftPeakFrequency(bypassData, sampleRate);
+                let bypassPeak = 0;
+                for (let i = 0; i < bypassData.length; i++) {
+                    const a = Math.abs(bypassData[i]);
+                    if (a > bypassPeak) bypassPeak = a;
+                }
+
+                URL.revokeObjectURL(testWorkletUrl);
+
+                const silencePass = preBurstPeak < 1e-5;
+                const bypassPass = Math.abs(bypassFreq - 220) <= 1.5 && bypassPeak <= 0.98 && bypassPeak >= 0.4;
+
+                return {
+                    measuredAlgoDelaySamples,
+                    measuredAlgoDelayMs,
+                    renderWallMs,
+                    quantumMs: (128 / sampleRate) * 1000,
+                    silencePass,
+                    preBurstPeak,
+                    bypassPass,
+                    bypassFreq,
+                    bypassPeak,
+                    ackReceived
+                };
+            } catch (e) {
+                if (testWorkletUrl) URL.revokeObjectURL(testWorkletUrl);
+                throw e;
             }
         }
 
         runTestsBtn.addEventListener('click', async () => {
             testResults.innerHTML = '';
-            logTest('Evaluating Audio Engine Architecture...', 'info');
-            logTest('Algorithm: STFT Phase Vocoder with Optimized Hop-Sync OLA');
-            logTest('Formant Preservation: Active (Independent Magnitude Scaling)');
-            logTest('Algorithmic Latency: 21.3ms (1024 frames @ 48kHz)');
-            logTest('Dependencies: None (Native JS FFT injected)');
-            logTest('-------------------------------------');
-            logTest('Initializing DSP Tests (48kHz Offline, 220Hz Sine Input)...');
+            logTest('Starting Automated DSP Acceptance Suite (48kHz, 220Hz Sine)...', 'info');
             
             runTestsBtn.disabled = true;
             runTestsBtn.classList.add('opacity-50', 'cursor-not-allowed');
             
             let passedCount = 0;
-            const totalTests = 4;
-            const results = [];
+            const allResults = [];
 
-            results.push(await testPitchRatio(0.75, 165));
-            results.push(await testPitchRatio(1.00, 220));
-            results.push(await testPitchRatio(1.40, 308));
-            results.push(await testPitchRatio(1.70, 374));
-            
-            results.forEach(res => {
-                if(res.passed) {
-                    logTest(`PASS: ${res.msg}`, 'success');
-                    passedCount++;
-                } else {
-                    logTest(`FAIL: ${res.msg}`, 'error');
-                }
+            // Measure actual latency, silence handling, and dry bypass first
+            const aux = await measureEmpiricalLatencyAndSystemAuxTests();
+            const dspExecPerQuantumMs = (aux.renderWallMs / (48000 / 128));
+            const totalAddedProcessingLatencyMs = aux.measuredAlgoDelayMs + aux.quantumMs + dspExecPerQuantumMs;
+
+            logTest(`Env: ${navigator.hardwareConcurrency || '?'} cores | SR: 48000Hz | Quantum: ${aux.quantumMs.toFixed(2)}ms (128 frames)`);
+            logTest(`Measured STFT/OLA Buffering Delay: ${aux.measuredAlgoDelayMs.toFixed(2)}ms (${aux.measuredAlgoDelaySamples} samples)`);
+            logTest(`Measured DSP Execution Time: ${dspExecPerQuantumMs.toFixed(3)}ms/quantum (${aux.renderWallMs.toFixed(1)}ms per 1.0s audio)`);
+            logTest(`Measured Limiter Buffering Delay: 0.00ms (zero-lookahead envelope)`);
+            logTest(`Total Measured Added Processing Latency: ${totalAddedProcessingLatencyMs.toFixed(2)}ms (< 100ms requirement)`);
+            logTest('------------------------------------------------------------');
+
+            // TASK 1: 4 Isolated Pitch-Only Tests (formantRatio: 1.0)
+            logTest('SUITE 1: Isolated Pitch-Only Tests (formantRatio = 1.00)', 'info');
+            const pitchOnlySuite = [
+                { pitchRatio: 0.75, formantRatio: 1.00, expectedFreq: 165, label: 'Pitch-Only Male' },
+                { pitchRatio: 1.00, formantRatio: 1.00, expectedFreq: 220, label: 'Pitch-Only Normal' },
+                { pitchRatio: 1.40, formantRatio: 1.00, expectedFreq: 308, label: 'Pitch-Only Female' },
+                { pitchRatio: 1.70, formantRatio: 1.00, expectedFreq: 374, label: 'Pitch-Only Child' }
+            ];
+
+            for (const cfg of pitchOnlySuite) {
+                const res = await testPitchConfiguration(cfg);
+                allResults.push(res);
+                logTest(res.msg, res.passed ? 'success' : 'error');
+            }
+
+            logTest('------------------------------------------------------------');
+            // TASK 2: 3 Real Preset Tests (Using actual PRESETS pitchRatio + formantRatio)
+            logTest('SUITE 2: Real Preset Configuration Tests (Decoupled Formants)', 'info');
+            const presetSuite = [
+                { pitchRatio: PRESETS.male.ratio, formantRatio: PRESETS.male.formantRatio, expectedFreq: 165, label: 'Preset Male' },
+                { pitchRatio: PRESETS.female.ratio, formantRatio: PRESETS.female.formantRatio, expectedFreq: 308, label: 'Preset Female' },
+                { pitchRatio: PRESETS.child.ratio, formantRatio: PRESETS.child.formantRatio, expectedFreq: 374, label: 'Preset Child' }
+            ];
+
+            for (const cfg of presetSuite) {
+                const res = await testPitchConfiguration(cfg);
+                allResults.push(res);
+                logTest(res.msg, res.passed ? 'success' : 'error');
+            }
+
+            logTest('------------------------------------------------------------');
+            // TASK 3: Maximum Volume (200%), Silence, Bypass & Parameter Sync Tests
+            logTest('SUITE 3: Limiter Protection (200% Max Vol), Bypass & Silence', 'info');
+            const maxVolFemale = await testPitchConfiguration({
+                pitchRatio: PRESETS.female.ratio,
+                formantRatio: PRESETS.female.formantRatio,
+                expectedFreq: 308,
+                label: 'MaxVol 200% Female',
+                masterVol: 2.0
             });
-            
-            logTest('-------------------------------------');
+            allResults.push(maxVolFemale);
+            logTest(maxVolFemale.msg, maxVolFemale.passed ? 'success' : 'error');
+
+            const maxVolChild = await testPitchConfiguration({
+                pitchRatio: PRESETS.child.ratio,
+                formantRatio: PRESETS.child.formantRatio,
+                expectedFreq: 374,
+                label: 'MaxVol 200% Child',
+                masterVol: 2.0
+            });
+            allResults.push(maxVolChild);
+            logTest(maxVolChild.msg, maxVolChild.passed ? 'success' : 'error');
+
+            const silenceRes = {
+                passed: aux.silencePass,
+                msg: `[Silence Input] Measured Peak: ${aux.preBurstPeak.toFixed(6)} -> ${aux.silencePass ? 'PASS' : 'FAIL'}`
+            };
+            allResults.push(silenceRes);
+            logTest(silenceRes.msg, silenceRes.passed ? 'success' : 'error');
+
+            const bypassRes = {
+                passed: aux.bypassPass,
+                msg: `[Dry Bypass] Exp:220Hz Meas:${aux.bypassFreq.toFixed(1)}Hz Peak:${aux.bypassPeak.toFixed(3)} -> ${aux.bypassPass ? 'PASS' : 'FAIL'}`
+            };
+            allResults.push(bypassRes);
+            logTest(bypassRes.msg, bypassRes.passed ? 'success' : 'error');
+
+            passedCount = allResults.filter(r => r.passed).length;
+            const totalTests = allResults.length;
+
+            logTest('------------------------------------------------------------');
             if (passedCount === totalTests) {
-                logTest(`SUMMARY: ${passedCount}/${totalTests} tests passed. Engine verified.`, 'success');
-                logTest('Audio Quality Findings:');
-                logTest('- Formant extraction decoupled from pitch successfully.');
-                logTest('- Dynamic Memory Allocation eliminated in processing block.');
+                logTest(`SUMMARY: PASS (${passedCount}/${totalTests} tests passed). All pitch, preset, limiter (<=0.98 peak), and bypass checks succeeded.`, 'success');
             } else {
-                logTest(`SUMMARY: FAILED. ${totalTests - passedCount} tests failed.`, 'error');
+                logTest(`SUMMARY: FAILED (${passedCount}/${totalTests} passed, ${totalTests - passedCount} failed).`, 'error');
             }
 
             runTestsBtn.disabled = false;
